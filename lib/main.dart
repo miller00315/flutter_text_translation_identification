@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 void main() {
@@ -29,71 +30,101 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  TextEditingController textEditingController = TextEditingController();
-  String result = 'Translated text...';
+  late TextEditingController _textEditingController;
 
-  bool isAppReady = false;
+  String _result = 'Translated text...';
 
-  late OnDeviceTranslatorModelManager modelManager;
+  bool _isAppReady = false;
 
-  TranslateLanguage? source;
+  late OnDeviceTranslatorModelManager _modelManager;
 
-  TranslateLanguage? destiny;
+  late LanguageIdentifier _languageIdentifier;
 
-  OnDeviceTranslator? onDeviceTranslator;
+  TranslateLanguage? _source;
+
+  TranslateLanguage? _target;
+
+  OnDeviceTranslator? _onDeviceTranslator;
+
+  late FocusNode _focusNode;
 
   @override
   void initState() {
     super.initState();
 
-    modelManager = OnDeviceTranslatorModelManager();
+    _modelManager = OnDeviceTranslatorModelManager();
+    _focusNode = FocusNode();
+    _textEditingController = TextEditingController();
+    _languageIdentifier = LanguageIdentifier(confidenceThreshold: 0.5);
 
-    setUpModels();
+    setUpModels().then(
+      (_) => setState(
+        () {
+          _isAppReady = true;
+          _source;
+          _target;
+        },
+      ),
+    );
   }
 
   @override
   void dispose() async {
+    _focusNode.dispose();
+    _textEditingController.dispose();
+    _languageIdentifier.close();
+
     super.dispose();
   }
 
-  setUpModels() async {
-    await checkAndDownloadModel(language: TranslateLanguage.english);
+  Future setUpModels() async {
+    _source = await checkAndDownloadModel(language: TranslateLanguage.english);
 
-    await checkAndDownloadModel(language: TranslateLanguage.portuguese);
-
-    setState(() {
-      isAppReady = true;
-    });
+    _target =
+        await checkAndDownloadModel(language: TranslateLanguage.portuguese);
   }
 
-  checkAndDownloadModel({required TranslateLanguage language}) async {
+  Future<TranslateLanguage?> checkAndDownloadModel(
+      {required TranslateLanguage language}) async {
     final bool isModelDownloaded =
-        await modelManager.isModelDownloaded(language.bcpCode);
+        await _modelManager.isModelDownloaded(language.bcpCode);
 
     if (!isModelDownloaded) {
-      await modelManager.downloadModel(language.bcpCode);
+      await _modelManager.downloadModel(language.bcpCode);
     }
+
+    return language;
   }
 
-  translateText(
-    String text, {
-    required TranslateLanguage source,
-    required TranslateLanguage target,
-  }) async {
-    onDeviceTranslator = OnDeviceTranslator(
-      sourceLanguage: source,
-      targetLanguage: target,
-    );
+  translateText(String text) {
+    _focusNode.unfocus();
 
-    onDeviceTranslator?.translateText(text).then((value) => {
-          setState(() {
-            result = value;
-          }),
-          onDeviceTranslator?.close(),
-        });
+    if (_source != null && _target != null) {
+      _onDeviceTranslator = OnDeviceTranslator(
+        sourceLanguage: _source!,
+        targetLanguage: _target!,
+      );
+
+      _onDeviceTranslator
+          ?.translateText(text)
+          .then((value) => {
+                setState(() {
+                  _result = value;
+                }),
+              })
+          .whenComplete(
+            () => _onDeviceTranslator?.close(),
+          );
+    }
+
+    _identifyLanguages(text);
   }
 
-  identifyLanguages(String text) async {}
+  _identifyLanguages(String text) async {
+    final String response = await _languageIdentifier.identifyLanguage(text);
+
+    _textEditingController.text += ' ($response)';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +134,7 @@ class _MyHomePageState extends State<MyHomePage> {
         body: SafeArea(
           child: Container(
             color: Colors.black12,
-            child: isAppReady
+            child: _isAppReady
                 ? Column(
                     children: [
                       Container(
@@ -115,9 +146,9 @@ class _MyHomePageState extends State<MyHomePage> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              const Text(
-                                'English',
-                                style: TextStyle(
+                              Text(
+                                _source?.name ?? 'Unknown',
+                                style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold),
                               ),
@@ -126,9 +157,9 @@ class _MyHomePageState extends State<MyHomePage> {
                                 width: 1,
                                 color: Colors.white,
                               ),
-                              const Text(
-                                'Portuguese',
-                                style: TextStyle(
+                              Text(
+                                _target?.name ?? 'Unknown',
+                                style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold),
                               )
@@ -146,7 +177,11 @@ class _MyHomePageState extends State<MyHomePage> {
                           child: Padding(
                             padding: const EdgeInsets.all(8.0),
                             child: TextField(
-                              controller: textEditingController,
+                              focusNode: _focusNode,
+                              textInputAction: TextInputAction.done,
+                              controller: _textEditingController,
+                              onEditingComplete: () =>
+                                  translateText(_textEditingController.text),
                               decoration: const InputDecoration(
                                 fillColor: Colors.white,
                                 hintText: 'Type text here...',
@@ -169,11 +204,7 @@ class _MyHomePageState extends State<MyHomePage> {
                               backgroundColor: Colors.green),
                           child: const Text('Translate'),
                           onPressed: () {
-                            translateText(
-                              textEditingController.text,
-                              target: TranslateLanguage.portuguese,
-                              source: TranslateLanguage.english,
-                            );
+                            translateText(_textEditingController.text);
                           },
                         ),
                       ),
@@ -187,7 +218,7 @@ class _MyHomePageState extends State<MyHomePage> {
                           child: Container(
                             padding: const EdgeInsets.all(15),
                             child: Text(
-                              result,
+                              _result,
                               style: const TextStyle(fontSize: 18),
                             ),
                           ),
